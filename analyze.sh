@@ -66,8 +66,8 @@ max_tool_count=$(echo "$tool_sorted" | head -1 | awk '{print $1}')
 : "${max_tool_count:=1}"
 
 keywords=$(jq -r '.text' "$HISTORY" | \
-  grep -oiE '(Chrome拡張|CLI|GAS|Slack|API|PR|commit|push|test|deploy|CI|CD|Homebrew|chezmoi|dotfiles|Playwright|review|bug|fix|リリース|公開|記事|ブログ|画像|MCP|Serena)' | \
-  tr '[:upper:]' '[:lower:]' | sort | uniq -c | sort -rn | head -10)
+  grep -oiE '(Chrome拡張|CLI|GAS|Slack|API|PR|commit|push|test|deploy|CI|CD|Homebrew|chezmoi|dotfiles|Playwright|review|bug|fix|リリース|公開|記事|ブログ|画像|MCP|Serena)' 2>/dev/null | \
+  tr '[:upper:]' '[:lower:]' | sort | uniq -c | sort -rn | head -10) || true
 
 top_sessions=$(jq -r '{id: .session_id, text: .text}' "$HISTORY" | \
   jq -rs 'group_by(.id) | map({id: .[0].id, count: length, first_msg: .[0].text}) | sort_by(-.count) | .[0:5]')
