@@ -10,14 +10,12 @@ BIN_DIR="${HOME}/.local/bin"
 echo "Installing codex-insights..."
 
 # Check dependencies
-for cmd in git jq claude; do
+for cmd in git jq codex; do
   if ! command -v "$cmd" &>/dev/null; then
     echo "Error: $cmd is required." >&2
-    if [[ "$cmd" == "claude" ]]; then
-      echo "  Install Claude Code: https://docs.anthropic.com/en/docs/claude-code" >&2
-    else
-      echo "  brew install $cmd" >&2
-    fi
+    [[ "$cmd" == "codex" ]] && echo "  Install Codex CLI: https://github.com/openai/codex" >&2
+    [[ "$cmd" == "jq" ]] && echo "  brew install jq" >&2
+    [[ "$cmd" == "git" ]] && echo "  brew install git" >&2
     exit 1
   fi
 done
