@@ -24,9 +24,8 @@ codex-insights --force   # キャッシュを無視して再分析
 
 ## Requirements
 
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code)（AI 分析に使用）
+- [Codex CLI](https://github.com/openai/codex)
 - jq (`brew install jq`)
-- [Codex CLI](https://github.com/openai/codex) のセッションデータ（`~/.codex/`）
 
 ## What It Generates
 

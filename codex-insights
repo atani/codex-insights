@@ -21,14 +21,11 @@ INSIGHTS_JSON="${OUTPUT_DIR}/insights.json"
 mkdir -p "$OUTPUT_DIR"
 
 # ── Dependency check ──
-for cmd in jq claude; do
+for cmd in jq codex; do
   if ! command -v "$cmd" &>/dev/null; then
     echo "Error: $cmd is required." >&2
-    if [[ "$cmd" == "claude" ]]; then
-      echo "  Install Claude Code: https://docs.anthropic.com/en/docs/claude-code" >&2
-    else
-      echo "  brew install $cmd" >&2
-    fi
+    [[ "$cmd" == "codex" ]] && echo "  Install Codex CLI: https://github.com/openai/codex" >&2
+    [[ "$cmd" == "jq" ]] && echo "  brew install jq" >&2
     exit 1
   fi
 done
@@ -46,7 +43,7 @@ for arg in "$@"; do
   esac
 done
 
-# ── AI Analysis: generate insights.json via claude -p ──
+# ── AI Analysis: generate insights.json via codex exec ──
 generate_insights() {
   echo "Generating AI analysis..."
 
@@ -77,8 +74,12 @@ generate_insights() {
     count=$((count + 1))
   done
 
-  local prompt
-  prompt=$(cat <<PROMPT
+  local tmpout
+  tmpout=$(mktemp)
+  trap 'rm -f "$tmpout"' RETURN
+
+  # Run codex exec with prompt via stdin, output to temp file
+  cat <<PROMPT | codex exec --skip-git-repo-check -o "$tmpout" - 2>/dev/null || true
 Analyze this Codex CLI usage data and output ONLY valid JSON (no markdown, no code fences, no explanation).
 
 ## Stats
@@ -121,13 +122,10 @@ Rules:
 - Base everything on the ACTUAL data above, do not fabricate
 - Output ONLY the JSON object, nothing else
 PROMPT
-  )
 
+  # Read response and strip markdown fences
   local response
-  response=$(claude -p "$prompt" 2>/dev/null) || true
-
-  # Strip markdown code fences if present
-  response=$(echo "$response" | sed '/^```/d')
+  response=$(sed '/^```/d' "$tmpout" 2>/dev/null) || true
 
   if [[ -n "$response" ]] && echo "$response" | jq . >/dev/null 2>&1; then
     echo "$response" | jq . > "$INSIGHTS_JSON"
