@@ -36,11 +36,11 @@ unique_sessions=$(jq -r '.session_id' "$HISTORY" | sort -u | wc -l | tr -d ' ')
 
 first_ts=$(jq -r '.ts' "$HISTORY" | head -1)
 last_ts=$(jq -r '.ts' "$HISTORY" | tail -1)
-first_date=$(date -r "$first_ts" '+%Y-%m-%d' 2>/dev/null || echo "unknown")
-last_date=$(date -r "$last_ts" '+%Y-%m-%d' 2>/dev/null || echo "unknown")
+first_date=$(date -r "$first_ts" '+%Y-%m-%d' 2>/dev/null || date -d "@$first_ts" '+%Y-%m-%d' 2>/dev/null || echo "unknown")
+last_date=$(date -r "$last_ts" '+%Y-%m-%d' 2>/dev/null || date -d "@$last_ts" '+%Y-%m-%d' 2>/dev/null || echo "unknown")
 
 days_active=$(( (last_ts - first_ts) / 86400 + 1 ))
-msgs_per_day=$(echo "scale=1; $total_messages / $days_active" | bc)
+msgs_per_day=$(awk "BEGIN {printf \"%.1f\", $total_messages / $days_active}")
 avg_msgs=$(jq -r '.session_id' "$HISTORY" | sort | uniq -c | awk '{sum+=$1; n++} END {printf "%.1f", sum/n}')
 
 # Session file analysis
@@ -221,7 +221,7 @@ STATS
 
 echo "$project_sorted" | while read -r count name; do
   [[ -z "$count" ]] && continue
-  pct=$(echo "scale=1; $count * 100 / $max_project_count" | bc)
+  pct=$(awk "BEGIN {printf \"%.1f\", $count * 100 / $max_project_count}")
   printf '      <div class="bar-row"><div class="bar-label">%s</div><div class="bar-track"><div class="bar-fill" style="width:%s%%;background:#2563eb"></div></div><div class="bar-value">%s</div></div>\n' "$name" "$pct" "$count" >> "$OUTPUT_HTML"
 done
 
@@ -233,7 +233,7 @@ MID
 
 echo "$tool_sorted" | while read -r count name; do
   [[ -z "$count" ]] && continue
-  pct=$(echo "scale=1; $count * 100 / $max_tool_count" | bc)
+  pct=$(awk "BEGIN {printf \"%.1f\", $count * 100 / $max_tool_count}")
   printf '      <div class="bar-row"><div class="bar-label">%s</div><div class="bar-track"><div class="bar-fill" style="width:%s%%;background:#0891b2"></div></div><div class="bar-value">%s</div></div>\n' "$name" "$pct" "$count" >> "$OUTPUT_HTML"
 done
 

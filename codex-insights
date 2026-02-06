@@ -21,7 +21,7 @@ INSIGHTS_JSON="${OUTPUT_DIR}/insights.json"
 mkdir -p "$OUTPUT_DIR"
 
 # ── Dependency check ──
-for cmd in jq bc claude; do
+for cmd in jq claude; do
   if ! command -v "$cmd" &>/dev/null; then
     echo "Error: $cmd is required." >&2
     if [[ "$cmd" == "claude" ]]; then

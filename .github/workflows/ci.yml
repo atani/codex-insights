@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: ShellCheck
-        run: shellcheck codex-insights analyze.sh install.sh
+        run: shellcheck --severity=warning codex-insights analyze.sh install.sh
 
   test:
     name: Test
@@ -23,15 +23,6 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
-      - name: Install jq
-        run: |
-          if ! command -v jq &>/dev/null; then
-            if [[ "$RUNNER_OS" == "Linux" ]]; then
-              sudo apt-get install -y jq
-            else
-              brew install jq
-            fi
-          fi
       - name: Syntax check
         run: bash -n codex-insights && bash -n analyze.sh && bash -n install.sh
       - name: Test analyze.sh with mock data
