@@ -26,7 +26,10 @@ mkdir -p "$BIN_DIR"
 if [[ -d "$INSTALL_DIR/.git" ]]; then
   git -C "$INSTALL_DIR" pull --quiet
 else
-  rm -rf "$INSTALL_DIR"
+  if [[ -d "$INSTALL_DIR" ]]; then
+    echo "Removing existing non-git directory: $INSTALL_DIR"
+    rm -rf "$INSTALL_DIR"
+  fi
   git clone --quiet "$REPO" "$INSTALL_DIR"
 fi
 

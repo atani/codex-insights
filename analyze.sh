@@ -4,7 +4,21 @@
 # Output: ~/.codex/usage-data/report.html (mirrors Claude Code's path)
 # Compatible with macOS bash 3.x (no associative arrays)
 set -euo pipefail
-export LC_ALL=C.UTF-8 2>/dev/null || export LC_ALL=en_US.UTF-8 2>/dev/null || true
+if locale -a 2>/dev/null | grep -q 'C.UTF-8'; then
+  export LC_ALL=C.UTF-8
+elif locale -a 2>/dev/null | grep -q 'en_US.UTF-8'; then
+  export LC_ALL=en_US.UTF-8
+fi
+
+# HTML escape helper to prevent XSS
+html_escape() {
+  local s="$1"
+  s="${s//&/&amp;}"
+  s="${s//</&lt;}"
+  s="${s//>/&gt;}"
+  s="${s//\"/&quot;}"
+  echo "$s"
+}
 
 CODEX_DIR="${HOME}/.codex"
 HISTORY="${CODEX_DIR}/history.jsonl"
@@ -34,12 +48,13 @@ fi
 total_messages=$(wc -l < "$HISTORY" | tr -d ' ')
 unique_sessions=$(jq -r '.session_id' "$HISTORY" | sort -u | wc -l | tr -d ' ')
 
-first_ts=$(jq -r '.ts' "$HISTORY" | head -1)
-last_ts=$(jq -r '.ts' "$HISTORY" | tail -1)
+first_ts=$(jq -r '.ts | floor' "$HISTORY" | head -1)
+last_ts=$(jq -r '.ts | floor' "$HISTORY" | tail -1)
 first_date=$(date -r "$first_ts" '+%Y-%m-%d' 2>/dev/null || date -d "@$first_ts" '+%Y-%m-%d' 2>/dev/null || echo "unknown")
 last_date=$(date -r "$last_ts" '+%Y-%m-%d' 2>/dev/null || date -d "@$last_ts" '+%Y-%m-%d' 2>/dev/null || echo "unknown")
 
 days_active=$(( (last_ts - first_ts) / 86400 + 1 ))
+[[ $days_active -lt 1 ]] && days_active=1
 msgs_per_day=$(awk "BEGIN {printf \"%.1f\", $total_messages / $days_active}")
 avg_msgs=$(jq -r '.session_id' "$HISTORY" | sort | uniq -c | awk '{sum+=$1; n++} END {printf "%.1f", sum/n}')
 
@@ -90,10 +105,9 @@ cat > "$OUTPUT_HTML" <<'CSS'
 <head>
   <meta charset="utf-8">
   <title>Codex Insights</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: #f8fafc; color: #334155; line-height: 1.65; padding: 48px 24px; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f8fafc; color: #334155; line-height: 1.65; padding: 48px 24px; }
     .container { max-width: 800px; margin: 0 auto; }
     h1 { font-size: 32px; font-weight: 700; color: #0f172a; margin-bottom: 8px; }
     h2 { font-size: 20px; font-weight: 600; color: #0f172a; margin-top: 48px; margin-bottom: 16px; }
@@ -169,14 +183,14 @@ cat >> "$OUTPUT_HTML" <<HEADER
 HEADER
 
 # At a Glance (read from insights.json if exists, otherwise use data-driven defaults)
-if $has_insights && jq -e '.at_a_glance' "$INSIGHTS_JSON" >/dev/null 2>&1; then
-  working=$(jq -r '.at_a_glance.working' "$INSIGHTS_JSON")
-  hindering=$(jq -r '.at_a_glance.hindering' "$INSIGHTS_JSON")
-  quick_wins=$(jq -r '.at_a_glance.quick_wins' "$INSIGHTS_JSON")
+if [[ "$has_insights" == true ]] && jq -e '.at_a_glance' "$INSIGHTS_JSON" >/dev/null 2>&1; then
+  working=$(html_escape "$(jq -r '.at_a_glance.working' "$INSIGHTS_JSON")")
+  hindering=$(html_escape "$(jq -r '.at_a_glance.hindering' "$INSIGHTS_JSON")")
+  quick_wins=$(html_escape "$(jq -r '.at_a_glance.quick_wins' "$INSIGHTS_JSON")")
 else
   working="shell_command ${total_tool_calls}回の実行が示す通り、git操作・CI/CD・複数リポジトリ管理の自動化が安定稼働中。"
-  hindering="セッションデータから詳細な摩擦分析を行うには、codex-insights --deep を実行してください。"
-  quick_wins="まず codex-insights --deep で AI 分析を実行して、具体的な改善提案を取得しましょう。"
+  hindering="セッションデータから詳細な摩擦分析を行うには、codex-insights --force を実行してください。"
+  quick_wins="まず codex-insights --force で AI 分析を実行して、具体的な改善提案を取得しましょう。"
 fi
 
 cat >> "$OUTPUT_HTML" <<GLANCE
@@ -222,7 +236,8 @@ STATS
 echo "$project_sorted" | while read -r count name; do
   [[ -z "$count" ]] && continue
   pct=$(awk "BEGIN {printf \"%.1f\", $count * 100 / $max_project_count}")
-  printf '      <div class="bar-row"><div class="bar-label">%s</div><div class="bar-track"><div class="bar-fill" style="width:%s%%;background:#2563eb"></div></div><div class="bar-value">%s</div></div>\n' "$name" "$pct" "$count" >> "$OUTPUT_HTML"
+  escaped_name=$(html_escape "$name")
+  printf '      <div class="bar-row"><div class="bar-label">%s</div><div class="bar-track"><div class="bar-fill" style="width:%s%%;background:#2563eb"></div></div><div class="bar-value">%s</div></div>\n' "$escaped_name" "$pct" "$count" >> "$OUTPUT_HTML"
 done
 
 cat >> "$OUTPUT_HTML" <<'MID'
@@ -234,7 +249,8 @@ MID
 echo "$tool_sorted" | while read -r count name; do
   [[ -z "$count" ]] && continue
   pct=$(awk "BEGIN {printf \"%.1f\", $count * 100 / $max_tool_count}")
-  printf '      <div class="bar-row"><div class="bar-label">%s</div><div class="bar-track"><div class="bar-fill" style="width:%s%%;background:#0891b2"></div></div><div class="bar-value">%s</div></div>\n' "$name" "$pct" "$count" >> "$OUTPUT_HTML"
+  escaped_name=$(html_escape "$name")
+  printf '      <div class="bar-row"><div class="bar-label">%s</div><div class="bar-track"><div class="bar-fill" style="width:%s%%;background:#0891b2"></div></div><div class="bar-value">%s</div></div>\n' "$escaped_name" "$pct" "$count" >> "$OUTPUT_HTML"
 done
 
 printf '    </div>\n  </div>\n' >> "$OUTPUT_HTML"
@@ -243,7 +259,8 @@ printf '    </div>\n  </div>\n' >> "$OUTPUT_HTML"
 printf '\n  <h2 id="section-keywords">Top Keywords</h2>\n  <div class="keyword-grid">\n' >> "$OUTPUT_HTML"
 echo "$keywords" | while read -r count word; do
   [[ -z "$count" ]] && continue
-  printf '    <div class="keyword-chip"><span class="keyword-count">%s</span>%s</div>\n' "$count" "$word" >> "$OUTPUT_HTML"
+  escaped_word=$(html_escape "$word")
+  printf '    <div class="keyword-chip"><span class="keyword-count">%s</span>%s</div>\n' "$count" "$escaped_word" >> "$OUTPUT_HTML"
 done
 printf '  </div>\n' >> "$OUTPUT_HTML"
 
@@ -251,25 +268,25 @@ printf '  </div>\n' >> "$OUTPUT_HTML"
 # AI Analysis Sections (from insights.json)
 # ═══════════════════════════════════════
 
-if $has_insights; then
+if [[ "$has_insights" == true ]]; then
   # --- Wins ---
   printf '\n  <h2 id="section-wins">Impressive Things</h2>\n' >> "$OUTPUT_HTML"
-  jq -c '.wins[]' "$INSIGHTS_JSON" 2>/dev/null | while read -r win; do
-    title=$(echo "$win" | jq -r '.title')
-    desc=$(echo "$win" | jq -r '.desc')
+  while read -r win; do
+    title=$(html_escape "$(echo "$win" | jq -r '.title')")
+    desc=$(html_escape "$(echo "$win" | jq -r '.desc')")
     printf '  <div class="big-win"><div class="big-win-title">%s</div><div class="big-win-desc">%s</div></div>\n' "$title" "$desc" >> "$OUTPUT_HTML"
-  done
+  done < <(jq -c '.wins[]' "$INSIGHTS_JSON" 2>/dev/null)
 
   # --- Friction ---
   printf '\n  <h2 id="section-friction">Friction Points</h2>\n' >> "$OUTPUT_HTML"
-  jq -c '.friction[]' "$INSIGHTS_JSON" 2>/dev/null | while read -r fr; do
-    title=$(echo "$fr" | jq -r '.title')
-    desc=$(echo "$fr" | jq -r '.desc')
-    example=$(echo "$fr" | jq -r '.example // empty')
+  while read -r fr; do
+    title=$(html_escape "$(echo "$fr" | jq -r '.title')")
+    desc=$(html_escape "$(echo "$fr" | jq -r '.desc')")
+    example=$(html_escape "$(echo "$fr" | jq -r '.example // empty')")
     printf '  <div class="friction-card"><div class="friction-title">%s</div><div class="friction-desc">%s</div>' "$title" "$desc" >> "$OUTPUT_HTML"
     [[ -n "$example" ]] && printf '<div class="friction-example">%s</div>' "$example" >> "$OUTPUT_HTML"
     printf '</div>\n' >> "$OUTPUT_HTML"
-  done
+  done < <(jq -c '.friction[]' "$INSIGHTS_JSON" 2>/dev/null)
 
   # --- Suggestions with instructions.md additions ---
   printf '\n  <h2 id="section-suggestions">Suggestions</h2>\n' >> "$OUTPUT_HTML"
@@ -278,41 +295,45 @@ if $has_insights; then
   inst_count=$(jq '.instructions_additions | length' "$INSIGHTS_JSON" 2>/dev/null || echo 0)
   if [[ "$inst_count" -gt 0 ]]; then
     printf '  <div class="instructions-section"><h3>instructions.md に追加（コピーして貼り付け）</h3>\n' >> "$OUTPUT_HTML"
-    idx=0
-    jq -c '.instructions_additions[]' "$INSIGHTS_JSON" 2>/dev/null | while read -r item; do
-      text=$(echo "$item" | jq -r '.text')
-      why=$(echo "$item" | jq -r '.why // empty')
-      printf '    <div class="instructions-item"><div class="instructions-code" id="inst-%s">%s</div><button class="copy-btn" onclick="copyText('"'"'inst-%s'"'"', this)">Copy</button>' "$idx" "$text" "$idx" >> "$OUTPUT_HTML"
+    local_idx=0
+    while read -r item; do
+      text=$(html_escape "$(echo "$item" | jq -r '.text')")
+      why=$(html_escape "$(echo "$item" | jq -r '.why // empty')")
+      printf '    <div class="instructions-item"><div class="instructions-code" id="inst-%s">%s</div><button class="copy-btn" onclick="copyText('"'"'inst-%s'"'"', this)">Copy</button>' "$local_idx" "$text" "$local_idx" >> "$OUTPUT_HTML"
       [[ -n "$why" ]] && printf '<div class="instructions-why">%s</div>' "$why" >> "$OUTPUT_HTML"
       printf '</div>\n' >> "$OUTPUT_HTML"
-      idx=$((idx + 1))
-    done
+      local_idx=$((local_idx + 1))
+    done < <(jq -c '.instructions_additions[]' "$INSIGHTS_JSON" 2>/dev/null)
     printf '  </div>\n' >> "$OUTPUT_HTML"
   fi
 
   # Suggestion cards with copyable prompts
-  idx=0
-  jq -c '.suggestions[]' "$INSIGHTS_JSON" 2>/dev/null | while read -r sug; do
-    title=$(echo "$sug" | jq -r '.title')
-    desc=$(echo "$sug" | jq -r '.desc')
-    prompt=$(echo "$sug" | jq -r '.prompt // empty')
+  local_idx=0
+  while read -r sug; do
+    title=$(html_escape "$(echo "$sug" | jq -r '.title')")
+    desc=$(html_escape "$(echo "$sug" | jq -r '.desc')")
+    prompt=$(html_escape "$(echo "$sug" | jq -r '.prompt // empty')")
     printf '  <div class="suggestion-card"><div class="suggestion-title">%s</div><div class="suggestion-desc">%s</div>' "$title" "$desc" >> "$OUTPUT_HTML"
     if [[ -n "$prompt" ]]; then
-      printf '<div class="copyable-prompt"><div class="prompt-label">Codex に貼り付けるプロンプト</div><code id="prompt-%s">%s</code><button class="copy-btn" onclick="copyText('"'"'prompt-%s'"'"', this)">Copy</button></div>' "$idx" "$prompt" "$idx" >> "$OUTPUT_HTML"
+      printf '<div class="copyable-prompt"><div class="prompt-label">Codex に貼り付けるプロンプト</div><code id="prompt-%s">%s</code><button class="copy-btn" onclick="copyText('"'"'prompt-%s'"'"', this)">Copy</button></div>' "$local_idx" "$prompt" "$local_idx" >> "$OUTPUT_HTML"
     fi
     printf '</div>\n' >> "$OUTPUT_HTML"
-    idx=$((idx + 1))
-  done
+    local_idx=$((local_idx + 1))
+  done < <(jq -c '.suggestions[]' "$INSIGHTS_JSON" 2>/dev/null)
 
   # --- Comparison ---
   if jq -e '.comparison' "$INSIGHTS_JSON" >/dev/null 2>&1; then
     printf '\n  <h2 id="section-compare">Codex vs Claude Code</h2>\n' >> "$OUTPUT_HTML"
-    codex_items=$(jq -r '.comparison.codex[]' "$INSIGHTS_JSON" 2>/dev/null)
-    claude_items=$(jq -r '.comparison.claude[]' "$INSIGHTS_JSON" 2>/dev/null)
     printf '  <div class="compare-row">\n    <div class="compare-card"><h3 style="color:#2563eb;">Codex</h3><ul>\n' >> "$OUTPUT_HTML"
-    echo "$codex_items" | while read -r item; do printf '      <li>%s</li>\n' "$item" >> "$OUTPUT_HTML"; done
+    while read -r item; do
+      escaped_item=$(html_escape "$item")
+      printf '      <li>%s</li>\n' "$escaped_item" >> "$OUTPUT_HTML"
+    done < <(jq -r '.comparison.codex[]' "$INSIGHTS_JSON" 2>/dev/null)
     printf '    </ul></div>\n    <div class="compare-card"><h3 style="color:#d946ef;">Claude Code</h3><ul>\n' >> "$OUTPUT_HTML"
-    echo "$claude_items" | while read -r item; do printf '      <li>%s</li>\n' "$item" >> "$OUTPUT_HTML"; done
+    while read -r item; do
+      escaped_item=$(html_escape "$item")
+      printf '      <li>%s</li>\n' "$escaped_item" >> "$OUTPUT_HTML"
+    done < <(jq -r '.comparison.claude[]' "$INSIGHTS_JSON" 2>/dev/null)
     printf '    </ul></div>\n  </div>\n' >> "$OUTPUT_HTML"
   fi
 
@@ -321,16 +342,16 @@ else
   cat >> "$OUTPUT_HTML" <<'PLACEHOLDER'
 
   <h2 id="section-wins">Impressive Things</h2>
-  <div class="note">AI分析を実行すると、セッションデータから成功パターンを抽出します。<br><code>codex-insights --deep</code> を実行してください。</div>
+  <div class="note">AI分析を実行すると、セッションデータから成功パターンを抽出します。<br><code>codex-insights --force</code> を実行してください。</div>
 
   <h2 id="section-friction">Friction Points</h2>
-  <div class="note">AI分析を実行すると、摩擦点と改善提案を生成します。<br><code>codex-insights --deep</code> を実行してください。</div>
+  <div class="note">AI分析を実行すると、摩擦点と改善提案を生成します。<br><code>codex-insights --force</code> を実行してください。</div>
 
   <h2 id="section-suggestions">Suggestions</h2>
-  <div class="note">AI分析を実行すると、コピー可能な改善プロンプトを生成します。<br><code>codex-insights --deep</code> を実行してください。</div>
+  <div class="note">AI分析を実行すると、コピー可能な改善プロンプトを生成します。<br><code>codex-insights --force</code> を実行してください。</div>
 
   <h2 id="section-compare">Codex vs Claude Code</h2>
-  <div class="note">AI分析を実行すると、両ツールの使い分け比較を生成します。<br><code>codex-insights --deep</code> を実行してください。</div>
+  <div class="note">AI分析を実行すると、両ツールの使い分け比較を生成します。<br><code>codex-insights --force</code> を実行してください。</div>
 PLACEHOLDER
 fi
 
@@ -339,7 +360,7 @@ printf '\n  <h2 id="section-sessions">Top Sessions</h2>\n' >> "$OUTPUT_HTML"
 echo "$top_sessions" | jq -c '.[]' | while read -r session; do
   sid=$(echo "$session" | jq -r '.id')
   scount=$(echo "$session" | jq -r '.count')
-  first_msg=$(echo "$session" | jq -r '.first_msg' | LC_ALL=C sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g' | head -c 120)
+  first_msg=$(html_escape "$(echo "$session" | jq -r '.first_msg' | head -c 120)")
   short_id="${sid:0:12}"
   printf '  <div class="session-card"><div class="area-header"><span class="area-name">%s...</span><span class="area-count">%s messages</span></div><div class="session-msg">%s</div></div>\n' "$short_id" "$scount" "$first_msg" >> "$OUTPUT_HTML"
 done

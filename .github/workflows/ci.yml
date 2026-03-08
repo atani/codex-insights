@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: ShellCheck
-        run: shellcheck --severity=warning codex-insights analyze.sh install.sh
+        run: shellcheck --severity=info codex-insights analyze.sh install.sh
 
   test:
     name: Test
@@ -25,12 +25,124 @@ jobs:
       - uses: actions/checkout@v6
       - name: Syntax check
         run: bash -n codex-insights && bash -n analyze.sh && bash -n install.sh
+
       - name: Test analyze.sh with mock data
         run: |
-          mkdir -p ~/.codex/sessions/2025/01/01
-          echo '{"session_id":"test-001","ts":1704067200,"text":"hello"}' > ~/.codex/history.jsonl
-          echo '{"type":"session_meta","payload":{"cwd":"/tmp/test"}}' > ~/.codex/sessions/2025/01/01/test.jsonl
-          echo '{"type":"response_item","payload":{"type":"function_call","name":"exec_command"}}' >> ~/.codex/sessions/2025/01/01/test.jsonl
+          mkdir -p ~/.codex/sessions/2025/01/01 ~/.codex/sessions/2025/01/02
+
+          # Multiple history entries across sessions
+          cat > ~/.codex/history.jsonl <<'EOF'
+          {"session_id":"test-001","ts":1704067200,"text":"hello world"}
+          {"session_id":"test-001","ts":1704067260,"text":"fix bug in API"}
+          {"session_id":"test-001","ts":1704067320,"text":"commit and push"}
+          {"session_id":"test-002","ts":1704153600,"text":"review PR"}
+          {"session_id":"test-002","ts":1704153660,"text":"deploy to staging"}
+          {"session_id":"test-003","ts":1704240000,"text":"test CI pipeline"}
+          EOF
+
+          # Session files with diverse types
+          cat > ~/.codex/sessions/2025/01/01/test-001.jsonl <<'EOF'
+          {"type":"session_meta","payload":{"cwd":"/tmp/project-alpha"}}
+          {"type":"event_msg","payload":{"text":"hello world"}}
+          {"type":"response_item","payload":{"type":"function_call","name":"exec_command"}}
+          {"type":"response_item","payload":{"type":"function_call","name":"exec_command"}}
+          {"type":"response_item","payload":{"type":"function_call","name":"custom_tool_call"}}
+          EOF
+
+          cat > ~/.codex/sessions/2025/01/02/test-002.jsonl <<'EOF'
+          {"type":"session_meta","payload":{"cwd":"/tmp/project-beta"}}
+          {"type":"response_item","payload":{"type":"function_call","name":"exec_command"}}
+          EOF
+
           output=$(bash analyze.sh)
           test -f "$output"
-          echo "Report generated: $output"
+
+          # Validate report content
+          grep -q 'Codex Insights' "$output"
+          grep -q '6' "$output"  # total messages
+          grep -q 'project-alpha' "$output"
+          grep -q 'exec_command' "$output"
+          echo "Report content validated"
+
+      - name: Test analyze.sh with insights.json
+        run: |
+          cat > ~/.codex/usage-data/insights.json <<'INSIGHTS'
+          {
+            "at_a_glance": {
+              "working": "テスト用のワーキングメッセージ",
+              "hindering": "テスト用の摩擦メッセージ",
+              "quick_wins": "テスト用のクイックウィン"
+            },
+            "wins": [{"title": "テスト成功", "desc": "テスト説明"}],
+            "friction": [{"title": "テスト摩擦", "desc": "摩擦説明", "example": "例文"}],
+            "instructions_additions": [{"text": "テストルール", "why": "テスト理由"}],
+            "suggestions": [{"title": "提案1", "desc": "提案説明", "prompt": "テストプロンプト"}],
+            "comparison": {
+              "codex": ["Codex特徴1"],
+              "claude": ["Claude特徴1"]
+            }
+          }
+          INSIGHTS
+
+          output=$(bash analyze.sh)
+          test -f "$output"
+
+          # Validate AI-generated sections are rendered
+          grep -q 'テスト用のワーキングメッセージ' "$output"
+          grep -q 'テスト成功' "$output"
+          grep -q 'テスト摩擦' "$output"
+          grep -q '提案1' "$output"
+          grep -q 'Codex特徴1' "$output"
+          echo "Insights integration validated"
+
+      - name: Test HTML escaping
+        run: |
+          # Create insights.json with XSS-like content
+          cat > ~/.codex/usage-data/insights.json <<'INSIGHTS'
+          {
+            "at_a_glance": {
+              "working": "Test <script>alert(1)</script>",
+              "hindering": "Test & more <b>bold</b>",
+              "quick_wins": "Use \"quotes\" safely"
+            },
+            "wins": [{"title": "<img onerror=alert(1)>", "desc": "safe desc"}],
+            "friction": [],
+            "instructions_additions": [],
+            "suggestions": [],
+            "comparison": {"codex": ["item1"], "claude": ["item2"]}
+          }
+          INSIGHTS
+
+          output=$(bash analyze.sh)
+
+          # Verify XSS content is escaped
+          ! grep -q '<script>alert' "$output"
+          grep -q '&lt;script&gt;' "$output"
+          ! grep -q '<img onerror' "$output"
+          echo "HTML escaping validated"
+
+      - name: Test error handling
+        run: |
+          # Missing history file
+          rm -f ~/.codex/history.jsonl
+          if bash analyze.sh 2>/dev/null; then
+            echo "FAIL: should exit with error when history.jsonl is missing"
+            exit 1
+          fi
+          echo "Error handling validated"
+
+      - name: Test install.sh
+        run: |
+          # Create a mock codex command
+          mkdir -p ~/mock-bin
+          echo '#!/bin/bash' > ~/mock-bin/codex
+          echo 'echo "mock codex"' >> ~/mock-bin/codex
+          chmod +x ~/mock-bin/codex
+          export PATH="$HOME/mock-bin:$PATH"
+
+          bash install.sh
+
+          # Verify symlink
+          test -L ~/.local/bin/codex-insights
+          test -x ~/.local/share/codex-insights/codex-insights
+          echo "Install verified"

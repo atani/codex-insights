@@ -67,12 +67,13 @@ generate_insights() {
 
   local session_snippets=""
   local count=0
-  for sf in $(find "$SESSIONS_DIR" -name '*.jsonl' 2>/dev/null | sort -r | head -5); do
+  while IFS= read -r sf; do
+    [[ -z "$sf" ]] && continue
     session_snippets+="--- session $((count+1)) ---"$'\n'
     session_snippets+=$(jq -c 'select(.type == "session_meta" or .type == "event_msg" or (.type == "response_item" and .payload.type == "function_call"))' "$sf" 2>/dev/null | head -15)
     session_snippets+=$'\n'
     count=$((count + 1))
-  done
+  done < <(find "$SESSIONS_DIR" -name '*.jsonl' 2>/dev/null | sort -r | head -5)
 
   local tmpout
   tmpout=$(mktemp)
@@ -138,14 +139,14 @@ PROMPT
 
 # Run AI analysis (use cache if fresh < 1 hour)
 stale=true
-if [[ -f "$INSIGHTS_JSON" ]] && ! $FORCE; then
+if [[ -f "$INSIGHTS_JSON" ]] && [[ "$FORCE" != true ]]; then
   age=$(( $(date +%s) - $(stat -f %m "$INSIGHTS_JSON" 2>/dev/null || stat -c %Y "$INSIGHTS_JSON" 2>/dev/null || echo 0) ))
   if [[ $age -lt 3600 ]]; then
     stale=false
     echo "Using cached analysis ($(( age / 60 ))min old). Use --force to refresh."
   fi
 fi
-if $stale; then
+if [[ "$stale" == true ]]; then
   generate_insights || true
 fi
 

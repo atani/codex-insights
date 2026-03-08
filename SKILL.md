@@ -1,3 +1,8 @@
+---
+name: codex-insights
+description: Generate and report Codex usage insights.
+---
+
 # Codex Insights
 
 Usage:
