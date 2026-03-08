@@ -113,16 +113,7 @@ jobs:
           }
           INSIGHTS
 
-          jq . ~/.codex/usage-data/insights.json
           output=$(bash analyze.sh)
-          echo "Report: $output"
-
-          # Debug: show relevant parts of the report
-          echo "=== Debug: searching for script-related content ==="
-          grep -i 'script\|alert\|&lt;\|&gt;\|working' "$output" | head -10 || echo "No matches found"
-          echo "=== Debug: at-a-glance section ==="
-          grep -A2 'at-a-glance\|What.*working' "$output" | head -10 || echo "No at-a-glance found"
-          echo "=== End debug ==="
 
           # Verify XSS content is escaped
           if grep -q '<script>alert' "$output"; then
